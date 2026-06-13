@@ -1,0 +1,13 @@
+.git
+.venv
+venv
+results
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+notebooks
+*.md
+!README.md
+hf_cache
+models

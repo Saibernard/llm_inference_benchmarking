@@ -1,0 +1,12 @@
+# GPU-box deps (Colab / AWS) — DO NOT install on macOS (no CUDA wheels).
+# Pin vLLM for reproducibility: the engine binary IS part of the measurement.
+# Verify the exact version/tag exists before a run and keep it in lockstep with
+# DEFAULT_VLLM_VERSION in src/gpubench/config.py and the docker-compose image tag.
+vllm==0.11.0
+
+# NVML in-process bindings for low-overhead GPU telemetry (the `nvidia-ml-py`
+# package provides the `pynvml` module). Preferred over shelling out to nvidia-smi.
+pynvml>=12
+
+# transformers ships with vllm; listed for clarity (client-side tokenizer fallback).
+# transformers>=4.43
