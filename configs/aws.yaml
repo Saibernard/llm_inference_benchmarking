@@ -28,8 +28,8 @@ sweep:
 
 telemetry:
   enabled: true
-  backend: auto
-  interval_ms: 100
+  backend: nvidia-smi         # literally query nvidia-smi for util/HBM/power (use 'auto'/'nvml' for lower-overhead, same numbers)
+  interval_ms: 200            # 5 Hz keeps nvidia-smi subprocess overhead low on small (4-vCPU) instances
   enable_dcgm: false          # set true on datacenter GPUs for prefill/decode signals
   scrape_vllm_metrics: true
 
