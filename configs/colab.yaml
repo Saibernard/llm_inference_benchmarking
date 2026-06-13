@@ -29,7 +29,7 @@ sweep:
 
 telemetry:
   enabled: true
-  backend: auto               # NVML on the real GPU
+  backend: nvidia-smi         # literally query nvidia-smi for util/HBM/power (use 'auto'/'nvml' for lower-overhead, same numbers)
   interval_ms: 100
   scrape_vllm_metrics: true
 
