@@ -1,0 +1,56 @@
+# One-command Dockerized topology for AWS (or any single-GPU Linux box with the
+# NVIDIA Container Toolkit). The harness waits for vLLM to be healthy, then sweeps.
+#
+#   export HF_TOKEN=hf_...          # must have accepted the Llama-3.1 license
+#   docker compose up --build
+#
+# Results land in ./results (bind-mounted). The vLLM image tag is pinned to match
+# DEFAULT_VLLM_VERSION in src/gpubench/config.py — keep them in lockstep.
+
+services:
+  vllm:
+    image: vllm/vllm-openai:v0.11.0
+    command: >
+      --model meta-llama/Llama-3.1-8B-Instruct
+      --served-model-name llama3.1-8b
+      --dtype bfloat16
+      --gpu-memory-utilization 0.90
+      --max-model-len 8192
+      --seed 0
+      --no-enable-prefix-caching
+      --no-enable-log-requests
+      --host 0.0.0.0 --port 8000
+    environment:
+      - HF_TOKEN=${HF_TOKEN:?set HF_TOKEN to a Hugging Face token that accepted the Llama-3.1 license}
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+    ipc: host                       # vLLM workers need host shared memory
+    ports:
+      - "8000:8000"
+    volumes:
+      - hf-cache:/root/.cache/huggingface   # avoid re-downloading ~16GB on restart
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 40                   # model load can take minutes on first pull
+      start_period: 60s
+
+  harness:
+    build: .
+    depends_on:
+      vllm:
+        condition: service_healthy
+    command: ["run", "--config", "configs/aws.yaml", "--base-url", "http://vllm:8000"]
+    volumes:
+      - ./results:/app/results
+      - ./configs:/app/configs
+
+volumes:
+  hf-cache:
