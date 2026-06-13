@@ -1,0 +1,29 @@
+# Full local sweep against the GPU-free mock server (macOS dev / CI).
+# Exercises the latency-throughput knee using the mock's saturation model.
+platform: mock
+base_url: http://127.0.0.1:8000
+model: llama3.1-8b
+results_dir: results
+
+sweep:
+  mode: closed
+  concurrencies: [1, 2, 4, 8, 16, 32, 64, 96]
+  prompt_lens: [256]
+  output_lens: [64]
+  num_requests: 80
+  warmup_requests: 5
+  cooldown_s: 0.5
+  request_timeout_s: 60
+
+telemetry:
+  enabled: true
+  backend: synthetic
+  interval_ms: 100
+  scrape_vllm_metrics: true
+
+report:
+  make_plots: true
+
+slo:
+  ttft_ms: 500
+  tpot_ms: 50

@@ -1,0 +1,41 @@
+# AWS GPU box, full Dockerized run. With docker-compose the server is reachable
+# at http://vllm:8000; standalone use http://127.0.0.1:8000.
+platform: aws
+base_url: http://vllm:8000
+model: llama3.1-8b
+results_dir: results
+
+server:
+  model: meta-llama/Llama-3.1-8B-Instruct
+  served_model_name: llama3.1-8b
+  dtype: bfloat16
+  gpu_memory_utilization: 0.90
+  max_model_len: 8192
+  enable_prefix_caching: false
+  seed: 0
+
+sweep:
+  mode: open
+  request_rates: [2, 4, 8, 16, 24, 32, 48, 64]
+  prompt_lens: [512, 1024]
+  output_lens: [128]
+  num_requests: 300
+  warmup_requests: 24
+  burstiness: 1.0
+  max_concurrency: null
+  cooldown_s: 3
+  request_timeout_s: 180
+
+telemetry:
+  enabled: true
+  backend: auto
+  interval_ms: 100
+  enable_dcgm: false          # set true on datacenter GPUs for prefill/decode signals
+  scrape_vllm_metrics: true
+
+report:
+  make_plots: true
+
+slo:
+  ttft_ms: 1000
+  tpot_ms: 50
