@@ -1,0 +1,41 @@
+# Google Colab Pro: real vLLM running NATIVELY (no Docker — Colab is a container).
+# Open-loop QPS sweep reveals the saturation knee. Launch vLLM first (see the
+# notebook), then: gpubench run --config configs/colab.yaml
+platform: colab
+base_url: http://127.0.0.1:8000
+model: llama3.1-8b
+results_dir: results
+
+server:                       # recorded into the manifest; also used by `crosscheck`
+  model: meta-llama/Llama-3.1-8B-Instruct
+  served_model_name: llama3.1-8b
+  dtype: bfloat16
+  gpu_memory_utilization: 0.90
+  max_model_len: 8192
+  enable_prefix_caching: false
+  seed: 0
+
+sweep:
+  mode: open
+  request_rates: [2, 4, 8, 16, 24, 32]
+  prompt_lens: [512]
+  output_lens: [128]
+  num_requests: 200
+  warmup_requests: 16
+  burstiness: 1.0             # Poisson
+  max_concurrency: null       # uncapped client => coordinated-omission-correct
+  cooldown_s: 3
+  request_timeout_s: 120
+
+telemetry:
+  enabled: true
+  backend: auto               # NVML on the real GPU
+  interval_ms: 100
+  scrape_vllm_metrics: true
+
+report:
+  make_plots: true
+
+slo:
+  ttft_ms: 1000
+  tpot_ms: 50
