@@ -10,7 +10,8 @@
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://127.0.0.1:8000}"
-MODEL="${MODEL:-llama3.1-8b}"
+MODEL="${MODEL:-llama3.1-8b}"                                  # name sent in API requests (server's --served-model-name)
+TOKENIZER="${TOKENIZER:-meta-llama/Llama-3.1-8B-Instruct}"    # real HF repo id: bench loads the tokenizer LOCALLY
 INPUT_LEN="${INPUT_LEN:-512}"
 OUTPUT_LEN="${OUTPUT_LEN:-128}"
 NUM_PROMPTS="${NUM_PROMPTS:-200}"
@@ -23,6 +24,7 @@ ARGS=(
   --backend openai
   --endpoint /v1/completions
   --model "${MODEL}"
+  --tokenizer "${TOKENIZER}"
   --base-url "${BASE_URL}"
   --dataset-name random
   --random-input-len "${INPUT_LEN}"
