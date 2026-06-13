@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gpubench"
+version = "0.1.0"
+description = "Single-GPU LLM inference benchmarking harness for vLLM (coordinated-omission-correct, GPU-telemetry-correlated)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Saibernard Yogendran" }]
+dependencies = [
+    "httpx>=0.27",
+    "numpy>=1.26",
+    "pandas>=2.0",
+    "pyyaml>=6.0",
+    "matplotlib>=3.8",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+]
+
+[project.optional-dependencies]
+# Installed on the GPU box (Colab/AWS), not needed for local dev on macOS.
+gpu = ["pynvml>=12"]
+# Client-side tokenizer fallback (only used when the server's /tokenize is absent).
+tokenizer = ["transformers>=4.43"]
+# Kneedle knee detection; a pure-numpy fallback is used if absent.
+knee = ["kneed>=0.8"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+gpubench = "gpubench.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

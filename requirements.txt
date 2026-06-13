@@ -1,0 +1,13 @@
+# Core deps — install on ANY machine incl. macOS (no GPU needed).
+# These cover the load generator, metrics, reporter, and the mock server,
+# so the entire pipeline is testable locally against the mock GPU server.
+httpx>=0.27
+numpy>=1.26
+pandas>=2.0
+pyyaml>=6.0
+matplotlib>=3.8
+fastapi>=0.110
+uvicorn[standard]>=0.29
+
+# Optional (pure-numpy fallback exists): pip install kneed
+# kneed>=0.8
