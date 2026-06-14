@@ -234,3 +234,77 @@ so the benchmarking code is written once and never knows which platform it's on.
   which caps concurrency — visible as KV-cache% → ~100% and the wait-queue growing.
 - *"What's coordinated omission?"* → (See §6 — if you can explain the
   stopwatch-at-the-door story, you've got it.)
+
+---
+
+# Part II — what I actually found running it for real (and the lessons that only show up then)
+
+Everything above is the theory. Here's what a real A100 run taught me — and the most
+valuable lesson is one I didn't expect.
+
+## The result (single A100, Llama-3.1-8B, 512-token in / 128-token out)
+
+- **Throughput ceiling ≈ 13 req/s (~1,600 output tok/s).** Below ~8 req/s the server
+  keeps up (achieved ≈ offered). Push harder and **achieved throughput plateaus** — you
+  offer 16/24/32 req/s but only ~13 come out. That plateau is the GPU's max useful rate
+  for this model/config.
+- **The bottleneck was decode, not the queue.** Time-to-first-token stayed low (~160 ms);
+  it was **TPOT** (time per output token, ~48 ms) that crept past the 50 ms SLO. The GPU
+  telemetry agreed: utilization ~90% but **power sat below peak** and **KV-cache only ~32%
+  full** — the classic fingerprint of a **memory-bandwidth-bound decode**, not a compute
+  or memory-capacity wall.
+- **Goodput ≠ throughput.** Raw throughput kept inching up while *useful* throughput
+  (requests meeting the SLO) fell off — the gap is work nobody can use.
+
+## The lesson that matters most: cross-checking caught MY OWN bug
+
+This is the part to really teach — it's what separates a measurement *engineer* from
+someone who ran a script.
+
+I built my own load generator, got numbers, and they looked totally plausible — TTFT
+"exploding" to ~2.4 s under load. Great story… except it was **wrong**. When I pointed
+vLLM's *official* benchmark at the same server:
+- throughput, TPOT, and end-to-end latency **matched mine within ~10%** (good — the core
+  was sound);
+- but **my TTFT was 4.7× higher** than the official tool's (746 ms vs 159 ms).
+
+A self-built ruler can be *confidently* wrong. The only reason I caught it is that I
+cross-checked against a trusted reference. **That is the entire point of "trust, but
+verify."**
+
+## How I found the cause (a sharp distinction worth teaching)
+
+Two failure modes inflate latency and look identical on a chart, but they're different:
+- **Coordinated omission:** your load generator falls behind and sends *late*, so it never
+  records how late requests really were.
+- **A client-side bottleneck:** you send *on time*, but your own client (connection pool,
+  event loop) stalls *after* sending.
+
+The way to tell them apart: **record when you *intended* to send vs when you *actually*
+sent.** In my data that gap was **1.5 ms** — so I'd sent on time; it was **not**
+coordinated omission. The real culprit was my HTTP **connection pool (80)** being smaller
+than the **peak in-flight requests (141)** — so ~60 requests queued *inside my own client*,
+inflating TTFT (and, via token buffering, deflating TPOT). I sized the pool to the real
+peak and the numbers converged.
+
+**The kicker:** the bug had pointed me at the *wrong diagnosis* — "blame the queue." The
+corrected data pointed at **decode / memory-bandwidth**, which is exactly what the GPU
+telemetry had been saying all along. The cross-check didn't just fix a number; it fixed my
+*understanding*.
+
+## The unglamorous half is the real job
+
+Half of "inference engineering" is fighting the environment, and I hit all of it:
+- **Gated model access** — accept the license, mint a token, mind which account it's tied to.
+- **Reproducibility is not optional** — an *unpinned* dependency (a `transformers` version
+  too new for the pinned vLLM) silently broke the whole run. That one crash is *why* you
+  pin versions and write an environment manifest.
+- **GPU runtimes reset and wipe state**; editable installs don't load mid-kernel; a model's
+  *served name* isn't its *HuggingFace repo id*. None of this is in a tutorial — it's the job.
+
+## If you remember ONE thing
+
+> A benchmark is a **measurement instrument**, and **wrong numbers are worse than no
+> numbers.** So you make the math correct, you preserve the raw data, you label anything
+> synthetic — and above all you **cross-check against an independent reference**, because
+> the most dangerous result is the plausible-looking one that's quietly wrong.
