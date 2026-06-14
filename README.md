@@ -1,20 +1,69 @@
-# llm_inference_benchmarking — `gpubench`
+# llm_inference_benchmarking (`gpubench`)
 
-A **single-GPU LLM inference benchmarking harness** for [vLLM](https://docs.vllm.ai).
-It drives a vLLM OpenAI-compatible server with a *coordinated-omission-correct*
-load generator, correlates serving latency with GPU telemetry, finds the
-**latency–throughput knee**, and cross-checks every number against vLLM's own
-`vllm bench serve` as a reference oracle.
+A benchmarking harness for LLM inference on a single GPU. It starts a vLLM server,
+throws traffic at it with a load generator I wrote, watches the card with
+nvidia-smi, and works out how hard you can push one GPU before latency falls apart.
 
-It is built as a **measurement instrument**: the design assumes that *wrong
-numbers are worse than no numbers*, so the subtle, credibility-defining details
-(coordinated omission, the exact TPOT formula, the current vLLM `/metrics` names,
-the GQA KV-cache math) are gotten right and pinned by tests.
+I built it to learn inference serving properly. Anyone can call an LLM API; far
+fewer people can tell you how many users one GPU actually handles, or explain why
+it slows down. That was the skill I wanted.
 
-> New to LLM serving? Read [`TEACHING.md`](TEACHING.md) first — it explains the
-> whole thing from zero using one running analogy (a restaurant kitchen).
+The rule I held myself to was that the numbers have to be right, because a
+benchmark that lies is worse than no benchmark. So every metric gets cross-checked
+against vLLM's own `vllm bench serve`, and the math is pinned down with tests.
 
-![GPU saturation example](docs/sample_gpu_saturation.png)
+If you're new to this, start with [TEACHING.md](TEACHING.md). It explains the whole
+thing from scratch using a restaurant-kitchen analogy.
+
+![Latency vs throughput on an A100](docs/sample_pareto_knee.png)
+
+---
+
+## Results
+
+I ran this on a single A100 (through Colab) against Llama-3.1-8B with 512-token
+prompts and 128-token outputs, sweeping the request rate from 2 to 32 per second.
+Then I pointed vLLM's own `vllm bench serve` at the same server to check my work.
+The two agreed to within about 1 to 6 percent, so I'm confident the harness is
+measuring what it should.
+
+| Offered req/s | Achieved | TTFT p99 | TPOT p99 | Output tok/s | Goodput | KV-cache |
+|---:|---:|---:|---:|---:|---:|---:|
+| 2  | 1.96  | 101 ms  | 17 ms | 251  | 1.96 | 4%  |
+| 4  | 3.85  | 112 ms  | 20 ms | 493  | 3.85 | 6%  |
+| 8  | 7.39  | 160 ms  | 27 ms | 945  | 7.39 | 13% |
+| 16 | 12.65 | 317 ms  | 67 ms | 1620 | 6.14 | 52% |
+| 24 | 15.33 | 689 ms  | 79 ms | 1962 | 4.14 | 74% |
+| 32 | 16.09 | 1970 ms | 82 ms | 2059 | 0.00 | 76% |
+
+Goodput is the number of requests per second that met an SLO of TTFT under 1s and
+TPOT under 50ms.
+
+A few things this tells you:
+
+The server maxes out around 16 requests per second, or roughly 2,000 output tokens
+a second. You can offer more than that, but you don't get more work out the other
+end, you just pay for it in latency.
+
+The useful capacity is lower than the raw number. Holding it to the SLO above, you
+get about 7 req/s before requests start missing the deadline. After that, per-token
+latency drifts past 50ms and goodput falls off fast, all the way to zero at 32 req/s.
+
+What's actually slowing it down is the decode step, not request queueing and not
+running out of KV-cache memory. First-token latency stays low (under 350ms even at
+16 req/s) and the KV cache never fills up, topping out around 76%. The giveaway is
+on the GPU itself: it sits at about 89% utilization but power holds around 350W,
+well under the card's limit. That is what a memory-bandwidth-bound decode looks like.
+
+One more thing, because it was the most useful lesson of the whole project. My first
+run reported TTFT about five times too high, and I only caught it because I compared
+against vLLM's official tool. The problem wasn't the server at all. It was my load
+generator's HTTP connection pool being too small, so requests were piling up on my
+side before they ever reached vLLM. Once I sized the pool correctly everything lined
+up. That is the entire reason you cross-check your own numbers against something you
+already trust.
+
+![GPU utilization, KV-cache and power under load](docs/sample_gpu_saturation.png)
 
 ---
 
