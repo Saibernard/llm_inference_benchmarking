@@ -16,11 +16,11 @@ server:
 
 sweep:
   mode: open
-  request_rates: [2, 4, 8, 16, 24, 32, 48, 64]
-  prompt_lens: [512, 1024]
-  output_lens: [128]
-  num_requests: 300
-  warmup_requests: 24
+  request_rates: [2, 4, 8, 16, 24, 32]   # A10G saturates well before 64; this captures the knee
+  prompt_lens: [512]                      # single prompt/output so the rate-sweep plots stay clean
+  output_lens: [128]                      # the other dimensions are swept in configs/aws_dimensions.yaml
+  num_requests: 200
+  warmup_requests: 16
   burstiness: 1.0
   max_concurrency: null
   cooldown_s: 3

@@ -1,0 +1,32 @@
+# Closed-loop sweep that exercises the remaining three sweep dimensions on real
+# hardware: concurrency, prompt length, and output length (3 x 2 x 2 = 12 cells).
+# Run this after the rate sweep (configs/aws.yaml), while the vLLM server is up.
+# Kept small (60 requests/cell) since it's about covering the dimensions, not a
+# clean knee curve.
+platform: aws
+base_url: http://vllm:8000
+model: llama3.1-8b
+results_dir: results
+
+sweep:
+  mode: closed
+  concurrencies: [4, 16, 64]
+  prompt_lens: [512, 1024]
+  output_lens: [128, 256]
+  num_requests: 60
+  warmup_requests: 6
+  cooldown_s: 2
+  request_timeout_s: 180
+
+telemetry:
+  enabled: true
+  backend: nvidia-smi
+  interval_ms: 200
+  scrape_vllm_metrics: true
+
+report:
+  make_plots: true
+
+slo:
+  ttft_ms: 1000
+  tpot_ms: 50
