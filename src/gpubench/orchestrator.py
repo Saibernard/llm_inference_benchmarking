@@ -82,7 +82,24 @@ async def _wait_health(client: httpx.AsyncClient, base_url: str, timeout_s: floa
     raise RuntimeError(f"server at {base_url} not healthy within {timeout_s}s (last: {last})")
 
 
+def _raise_fd_limit(target: int = 8192) -> None:
+    """A large open-loop connection pool needs file descriptors; raise the soft limit."""
+    try:
+        import resource
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        resource.setrlimit(resource.RLIMIT_NOFILE, (min(max(soft, target), hard), hard))
+    except Exception:
+        pass
+
+
 def _client_concurrency(cfg: GpubenchConfig) -> int:
+    # Open-loop in-flight count is EMERGENT and spikes far above the nominal rate under
+    # saturation (e.g. rate 16 with multi-second latency -> ~140 concurrent). If the httpx
+    # pool is smaller than that peak, requests queue CLIENT-side and TTFT is inflated (a
+    # cross-check vs `vllm bench serve` revealed exactly this). Size it generously so the
+    # client never becomes the bottleneck.
+    if cfg.sweep.mode in (LoadMode.OPEN.value, LoadMode.MAX_THROUGHPUT.value):
+        return 1024
     candidates = [cfg.sweep.max_concurrency or 0]
     if cfg.sweep.concurrencies:
         candidates.append(max(cfg.sweep.concurrencies))
@@ -157,6 +174,7 @@ async def _run_all(cfg: GpubenchConfig, cells: list[dict], run_dir: Path) -> Non
 
 
 def run(cfg: GpubenchConfig) -> Path:
+    _raise_fd_limit()
     run_id = _run_id()
     run_dir = Path(cfg.results_dir) / run_id
     (run_dir / "configs").mkdir(parents=True, exist_ok=True)
