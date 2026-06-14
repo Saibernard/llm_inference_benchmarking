@@ -48,6 +48,17 @@ services:
       vllm:
         condition: service_healthy
     command: ["run", "--config", "configs/aws.yaml", "--base-url", "http://vllm:8000"]
+    environment:
+      # Inject nvidia-smi into this container so GPU telemetry is REAL, not synthetic.
+      # It only reads the card's stats; the vllm container drives the same physical GPU.
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     volumes:
       - ./results:/app/results
       - ./configs:/app/configs
