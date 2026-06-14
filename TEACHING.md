@@ -244,14 +244,14 @@ valuable lesson is one I didn't expect.
 
 ## The result (single A100, Llama-3.1-8B, 512-token in / 128-token out)
 
-- **Throughput ceiling ≈ 13 req/s (~1,600 output tok/s).** Below ~8 req/s the server
+- **Throughput ceiling ≈ 16 req/s (~2,000 output tok/s).** Below ~8 req/s the server
   keeps up (achieved ≈ offered). Push harder and **achieved throughput plateaus** — you
-  offer 16/24/32 req/s but only ~13 come out. That plateau is the GPU's max useful rate
+  offer 16/24/32 req/s but only ~16 come out. That plateau is the GPU's max useful rate
   for this model/config.
 - **The bottleneck was decode, not the queue.** Time-to-first-token stayed low (~160 ms);
   it was **TPOT** (time per output token, ~48 ms) that crept past the 50 ms SLO. The GPU
-  telemetry agreed: utilization ~90% but **power sat below peak** and **KV-cache only ~32%
-  full** — the classic fingerprint of a **memory-bandwidth-bound decode**, not a compute
+  telemetry agreed: utilization ~90% but **power sat below peak** and **KV-cache topped out
+  ~76% (never full)** — the classic fingerprint of a **memory-bandwidth-bound decode**, not a compute
   or memory-capacity wall.
 - **Goodput ≠ throughput.** Raw throughput kept inching up while *useful* throughput
   (requests meeting the SLO) fell off — the gap is work nobody can use.
