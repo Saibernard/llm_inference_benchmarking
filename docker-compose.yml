@@ -36,7 +36,7 @@ services:
               count: all
               capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
       interval: 15s
       timeout: 5s
       retries: 40                   # model load can take minutes on first pull
@@ -46,11 +46,17 @@ services:
     build: .
     depends_on:
       vllm:
-        condition: service_healthy
+        # service_started, not service_healthy: run_cloud.sh already waits on vLLM's
+        # /health from the host (the real readiness gate), so the harness must not be
+        # blocked by Compose's in-container healthcheck.
+        condition: service_started
     command: ["run", "--config", "configs/aws.yaml", "--base-url", "http://vllm:8000"]
     environment:
-      # Inject nvidia-smi into this container so GPU telemetry is REAL, not synthetic.
-      # It only reads the card's stats; the vllm container drives the same physical GPU.
+      # Expose the GPU + inject nvidia-smi so telemetry is REAL, not synthetic. The harness
+      # only READS the card's stats; the vllm container drives the same physical GPU. These
+      # take effect because run_cloud.sh makes 'nvidia' the DEFAULT docker runtime — the only
+      # thing `docker compose run` (vs `up`) reliably honors for GPU access on older Compose.
+      - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
     deploy:
       resources:

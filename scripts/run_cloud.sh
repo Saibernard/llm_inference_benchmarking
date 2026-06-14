@@ -20,6 +20,7 @@ HF_TOKEN="${HF_TOKEN:-}"; HF_TOKEN="${HF_TOKEN%$'\r'}"
 GH_TOKEN="${GH_TOKEN:-}"; GH_TOKEN="${GH_TOKEN%$'\r'}"
 : "${HF_TOKEN:?set HF_TOKEN in .env (your Hugging Face token)}"
 export HF_TOKEN HUGGING_FACE_HUB_TOKEN="${HF_TOKEN}"
+mkdir -p results   # bind-mount target + cross-check log dir must exist on the host
 
 # ---- docker / sudo detection (re-runnable: call again after installing docker) ----
 detect_docker() {
@@ -72,6 +73,18 @@ if ! dto 5m docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidi
   ${SUDO} apt-get update -qq && ${SUDO} apt-get install -y -qq nvidia-container-toolkit
   ${SUDO} nvidia-ctk runtime configure --runtime=docker
   ${SUDO} systemctl restart docker 2>/dev/null || ${SUDO} service docker restart 2>/dev/null || true
+fi
+
+# ---- make 'nvidia' the DEFAULT docker runtime so EVERY container gets the GPU ----
+# `docker compose run` (how the harness runs) does NOT reliably honor deploy.resources or
+# --gpus on older Compose, so the harness telemetry silently goes synthetic. Setting the
+# default runtime fixes that. Done before any container starts, so the docker restart is
+# harmless. Purely additive: if nvidia-ctk is absent it's skipped and behavior is unchanged.
+if command -v nvidia-ctk >/dev/null 2>&1; then
+  echo "=== setting nvidia as the default docker runtime (for harness GPU telemetry) ==="
+  ${SUDO} nvidia-ctk runtime configure --runtime=docker --set-as-default >/dev/null 2>&1 || true
+  ${SUDO} systemctl restart docker 2>/dev/null || ${SUDO} service docker restart 2>/dev/null || true
+  sleep 4; detect_docker
 fi
 
 # ---- FAIL FAST #1: GPU must be visible to Docker (before any download) ----
