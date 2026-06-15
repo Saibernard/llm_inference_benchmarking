@@ -1,1 +1,0 @@
-scripts/run_cloud.sh: line 37: 164032 Killed                  ${SUDO} timeout -k 30s "$t" "$@"
