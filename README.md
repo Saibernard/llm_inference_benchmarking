@@ -21,11 +21,15 @@ thing from scratch using a restaurant-kitchen analogy.
 
 ## Results
 
-I ran this on a single A100 (through Colab) against Llama-3.1-8B with 512-token
-prompts and 128-token outputs, sweeping the request rate from 2 to 32 per second.
-Then I pointed vLLM's own `vllm bench serve` at the same server to check my work.
+I first ran this on a single A100 through Colab against Llama-3.1-8B with 512-token
+prompts and 128-token outputs, sweeping the request rate from 2 to 32 per second,
+and checked my work by pointing vLLM's own `vllm bench serve` at the same server.
 The two agreed to within about 1 to 6 percent, so I'm confident the harness is
-measuring what it should.
+measuring what it should. I then ran the whole thing as the Dockerized stack on a
+cloud A100 (40 GB), this time recording real `nvidia-smi` telemetry, and it landed
+in the same place: the knee at roughly 1,650 output tokens a second, the GPU pinned
+near 92% with power around 360W, and the KV cache topping out near 77%. That run,
+raw data and all, is in [`results_published/cloud_a100_40gb`](results_published/cloud_a100_40gb).
 
 | Offered req/s | Achieved | TTFT p99 | TPOT p99 | Output tok/s | Goodput | KV-cache |
 |---:|---:|---:|---:|---:|---:|---:|
@@ -54,6 +58,16 @@ running out of KV-cache memory. First-token latency stays low (under 350ms even 
 16 req/s) and the KV cache never fills up, topping out around 76%. The giveaway is
 on the GPU itself: it sits at about 89% utilization but power holds around 350W,
 well under the card's limit. That is what a memory-bandwidth-bound decode looks like.
+
+A second sweep comes at the same question from the other side. Instead of a fixed
+arrival rate it holds a fixed number of clients hammering the server at once (4, then
+16, then 64) and varies the prompt and output lengths. The story matches: at 4
+concurrent clients first-token latency sits around 130ms, but at 64 it climbs past 2
+seconds while throughput more than doubles, which is the queue forming in front of a
+saturated GPU. Longer prompts cost more first-token time because prefill has more
+tokens to read, and the KV cache grows with both how many requests are in flight and
+how long each one is, reaching about 48% at 64 concurrent 1,024-token requests. Same
+GPU, same ceiling, seen two different ways.
 
 One more thing, because it was the most useful lesson of the whole project. My first
 run reported TTFT about five times too high, and I only caught it because I compared
