@@ -1,0 +1,108 @@
+{
+  "run_id": "2026-06-14T23-55-58Z_3f697b",
+  "gpubench_version": "0.1.0",
+  "vllm_version": "0.11.0",
+  "model": "llama3.1-8b",
+  "platform": "aws",
+  "base_url": "http://vllm:8000",
+  "hostname": "333b56f4c73c",
+  "telemetry_backend": "nvidia-smi",
+  "telemetry_synthetic": false,
+  "started_utc": "2026-06-14T23:55:58.866913+00:00",
+  "ended_utc": "2026-06-15T00:00:26.603752+00:00",
+  "config": {
+    "base_url": "http://vllm:8000",
+    "model": "llama3.1-8b",
+    "platform": "aws",
+    "results_dir": "results",
+    "server": {
+      "model": "meta-llama/Llama-3.1-8B-Instruct",
+      "served_model_name": "llama3.1-8b",
+      "max_model_len": 8192,
+      "dtype": "bfloat16",
+      "gpu_memory_utilization": 0.9,
+      "max_num_seqs": null,
+      "max_num_batched_tokens": null,
+      "enforce_eager": false,
+      "quantization": null,
+      "enable_prefix_caching": false,
+      "seed": 0,
+      "host": "0.0.0.0",
+      "port": 8000,
+      "vllm_version": "0.11.0"
+    },
+    "sweep": {
+      "mode": "open",
+      "request_rates": [
+        2.0,
+        4.0,
+        8.0,
+        16.0,
+        24.0,
+        32.0
+      ],
+      "concurrencies": [
+        1,
+        4,
+        16,
+        32,
+        64
+      ],
+      "prompt_lens": [
+        512
+      ],
+      "output_lens": [
+        128
+      ],
+      "num_requests": 200,
+      "warmup_requests": 16,
+      "burstiness": 1.0,
+      "max_concurrency": null,
+      "seed": 0,
+      "temperature": 0.0,
+      "request_timeout_s": 180,
+      "cooldown_s": 3
+    },
+    "telemetry": {
+      "enabled": true,
+      "backend": "nvidia-smi",
+      "interval_ms": 200,
+      "gpu_index": 0,
+      "enable_dcgm": false,
+      "scrape_vllm_metrics": true,
+      "metrics_url": null,
+      "guard_ms": 200,
+      "tdp_frac_compute": 0.9,
+      "dram_frac_decode": 0.5
+    },
+    "report": {
+      "make_plots": true,
+      "percentiles": [
+        50.0,
+        95.0,
+        99.0
+      ],
+      "knee_min_throughput_gain": 0.05,
+      "knee_util_threshold": 95.0,
+      "knee_kv_threshold": 0.95
+    },
+    "slo": {
+      "ttft_ms": 1000,
+      "tpot_ms": 50,
+      "e2el_ms": null
+    }
+  },
+  "slo": {
+    "ttft_ms": 1000,
+    "tpot_ms": 50,
+    "e2el_ms": null
+  },
+  "config_ids": [
+    "open-rate2-concna-pin512-pout128",
+    "open-rate4-concna-pin512-pout128",
+    "open-rate8-concna-pin512-pout128",
+    "open-rate16-concna-pin512-pout128",
+    "open-rate24-concna-pin512-pout128",
+    "open-rate32-concna-pin512-pout128"
+  ]
+}
