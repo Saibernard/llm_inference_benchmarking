@@ -112,7 +112,7 @@ done
 #      --rm with no TTY exits the instant the sweep ends; vLLM is left untouched throughout. ----
 PROJECT=$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]//g')
 VLLM_CID=$(${DC} ps -q vllm 2>/dev/null | head -1)
-NET=$(${DOCKER} inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}' "$VLLM_CID" 2>/dev/null | head -1)
+NET=$(${DOCKER} inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{println $k}}{{end}}' "$VLLM_CID" 2>/dev/null | grep -m1 "${PROJECT}_default")
 NET="${NET:-${PROJECT}_default}"; IMG="${PROJECT}-harness"
 echo "harness image: ${IMG}   vLLM network: ${NET}"
 
@@ -121,8 +121,12 @@ echo "=== preflight: harness GPU access (docker run --gpus all) ==="
 if dto 2m docker run --rm --gpus all -e NVIDIA_DRIVER_CAPABILITIES=all --entrypoint nvidia-smi "$IMG" -L >/dev/null 2>&1; then
   echo "harness sees the GPU — telemetry will be REAL."
 else
-  echo "WARNING: harness can't access the GPU even via docker run --gpus all — telemetry will be SYNTHETIC."
-  echo "(Not fatal: vLLM still has the GPU and the serving metrics are real.)"
+  # FATAL on purpose: the sweeps use this EXACT invocation, so a miss here means the whole run
+  # would produce SYNTHETIC GPU telemetry. Abort before spending sweep time on fabricated curves.
+  echo "ABORT: harness can't access the GPU via 'docker run --gpus all' — telemetry would be SYNTHETIC."
+  echo "Diagnostic (paste this and stop):"
+  ${DOCKER} run --rm --gpus all -e NVIDIA_DRIVER_CAPABILITIES=all --entrypoint nvidia-smi "$IMG" -L 2>&1 | head -20 || true
+  exit 1
 fi
 
 # ---- the two sweeps (hard-capped; plain docker run can't hang on a TTY or recreate vLLM) ----
@@ -155,6 +159,11 @@ if [ -n "${GH_TOKEN}" ]; then
   STAMP=$(date -u +%Y%m%dT%H%M%SZ); DEST="results_published/cloud_${STAMP}"; mkdir -p "$DEST"; collected=0
   for run in results/*/; do
     [ -f "${run}summary.csv" ] || continue
+    # only publish REAL runs: skip any leftover synthetic run dir (e.g. from an earlier broken
+    # attempt on this box) so the published data is never fabricated telemetry.
+    if grep -q '"telemetry_synthetic": true' "${run}run_manifest.json" 2>/dev/null; then
+      echo "skip synthetic run: ${run}"; continue
+    fi
     # copy the WHOLE run dir: summary.csv/json + run_manifest.json + plots/ + the RAW
     # per-request JSONL and per-cell telemetry.csv, so any metric can be recomputed later.
     cp -r "${run%/}" "$DEST/"
