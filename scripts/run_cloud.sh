@@ -75,18 +75,6 @@ if ! dto 5m docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidi
   ${SUDO} systemctl restart docker 2>/dev/null || ${SUDO} service docker restart 2>/dev/null || true
 fi
 
-# ---- make 'nvidia' the DEFAULT docker runtime so EVERY container gets the GPU ----
-# `docker compose run` (how the harness runs) does NOT reliably honor deploy.resources or
-# --gpus on older Compose, so the harness telemetry silently goes synthetic. Setting the
-# default runtime fixes that. Done before any container starts, so the docker restart is
-# harmless. Purely additive: if nvidia-ctk is absent it's skipped and behavior is unchanged.
-if command -v nvidia-ctk >/dev/null 2>&1; then
-  echo "=== setting nvidia as the default docker runtime (for harness GPU telemetry) ==="
-  ${SUDO} nvidia-ctk runtime configure --runtime=docker --set-as-default >/dev/null 2>&1 || true
-  ${SUDO} systemctl restart docker 2>/dev/null || ${SUDO} service docker restart 2>/dev/null || true
-  sleep 4; detect_docker
-fi
-
 # ---- FAIL FAST #1: GPU must be visible to Docker (before any download) ----
 if ! dto 5m docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi >/dev/null 2>&1; then
   echo "Docker cannot see the GPU. Output (paste this and stop):"
@@ -116,23 +104,38 @@ for _ in $(seq 1 180); do
 done
 [ -n "$ready" ] || { echo "vLLM not healthy within 15 min. Logs:"; ${DC} logs --tail 40 vllm; exit 1; }
 
-# ---- make sure the HARNESS container sees the GPU, else telemetry is silently synthetic ----
-HGPU=""
-echo "=== preflight: harness container GPU access ==="
-if dto 2m docker compose run --rm --entrypoint nvidia-smi harness -L >/dev/null 2>&1; then
-  echo "harness sees the GPU (via compose)."
-elif dto 2m docker compose run --rm --gpus all --entrypoint nvidia-smi harness -L >/dev/null 2>&1; then
-  echo "harness sees the GPU (via --gpus all)."; HGPU="--gpus all"
+# ---- resolve vLLM's network + the harness image, so we can run the harness via PLAIN
+#      `docker run --gpus all` instead of `docker compose run`. On this box compose run
+#      neither passes the GPU (telemetry went synthetic) nor exits cleanly (it hung for the
+#      full 45m cap, which then tore vLLM down and broke the next sweep). Plain `docker run
+#      --gpus all` is exactly what the fail-fast GPU check already proved works here, and
+#      --rm with no TTY exits the instant the sweep ends; vLLM is left untouched throughout. ----
+PROJECT=$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]//g')
+VLLM_CID=$(${DC} ps -q vllm 2>/dev/null | head -1)
+NET=$(${DOCKER} inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}' "$VLLM_CID" 2>/dev/null | head -1)
+NET="${NET:-${PROJECT}_default}"; IMG="${PROJECT}-harness"
+echo "harness image: ${IMG}   vLLM network: ${NET}"
+
+# ---- confirm the harness image sees the GPU via docker run --gpus all (real telemetry) ----
+echo "=== preflight: harness GPU access (docker run --gpus all) ==="
+if dto 2m docker run --rm --gpus all -e NVIDIA_DRIVER_CAPABILITIES=all --entrypoint nvidia-smi "$IMG" -L >/dev/null 2>&1; then
+  echo "harness sees the GPU — telemetry will be REAL."
 else
-  echo "WARNING: harness can't access the GPU — its util/power/memory columns will be SYNTHETIC."
+  echo "WARNING: harness can't access the GPU even via docker run --gpus all — telemetry will be SYNTHETIC."
   echo "(Not fatal: vLLM still has the GPU and the serving metrics are real.)"
 fi
 
-# ---- the two sweeps (hard-capped; one stuck sweep can't burn hours or block teardown) ----
+# ---- the two sweeps (hard-capped; plain docker run can't hang on a TTY or recreate vLLM) ----
 echo "=== sweep 1/2: open-loop request-rate sweep ==="
-dto 45m docker compose run --rm ${HGPU} harness run --config configs/aws.yaml || echo "(rate sweep timed out/errored — continuing)"
+dto 45m docker run --rm --gpus all --network "$NET" -e NVIDIA_DRIVER_CAPABILITIES=all \
+  -v "$PWD/results:/app/results" -v "$PWD/configs:/app/configs" "$IMG" \
+  run --config configs/aws.yaml --base-url http://vllm:8000 \
+  || echo "(rate sweep timed out/errored — continuing)"
 echo "=== sweep 2/2: closed-loop concurrency x prompt-length x output-length ==="
-dto 45m docker compose run --rm ${HGPU} harness run --config configs/aws_dimensions.yaml || echo "(dimensions sweep timed out/errored — continuing)"
+dto 45m docker run --rm --gpus all --network "$NET" -e NVIDIA_DRIVER_CAPABILITIES=all \
+  -v "$PWD/results:/app/results" -v "$PWD/configs:/app/configs" "$IMG" \
+  run --config configs/aws_dimensions.yaml --base-url http://vllm:8000 \
+  || echo "(dimensions sweep timed out/errored — continuing)"
 
 # ---- cross-check (captured to a file) ----
 echo "=== cross-check vs vLLM's official benchmark (rate 16) ==="
