@@ -1,0 +1,15 @@
+{
+  "config_id": "closed-ratena-conc4-pin512-pout128",
+  "mode": "closed",
+  "model": "llama3.1-8b",
+  "request_rate": null,
+  "concurrency": 4,
+  "prompt_len": 512,
+  "realized_prompt_tokens": 512,
+  "output_len": 128,
+  "sweep_point": 4.0,
+  "window_dur_s": 28.596806896999624,
+  "t_start_mono_ns": 7207254356821,
+  "t_stop_mono_ns": 7239634628077,
+  "n_records": 60
+}

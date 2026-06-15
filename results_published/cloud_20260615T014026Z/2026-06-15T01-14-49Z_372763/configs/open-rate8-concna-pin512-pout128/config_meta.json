@@ -1,0 +1,15 @@
+{
+  "config_id": "open-rate8-concna-pin512-pout128",
+  "mode": "open",
+  "model": "llama3.1-8b",
+  "request_rate": 8.0,
+  "concurrency": null,
+  "prompt_len": 512,
+  "realized_prompt_tokens": 512,
+  "output_len": 128,
+  "sweep_point": 8.0,
+  "window_dur_s": 26.952677786000095,
+  "t_start_mono_ns": 7111693567262,
+  "t_stop_mono_ns": 7142548725709,
+  "n_records": 200
+}
