@@ -1,0 +1,15 @@
+{
+  "config_id": "closed-ratena-conc64-pin1024-pout256",
+  "mode": "closed",
+  "model": "llama3.1-8b",
+  "request_rate": null,
+  "concurrency": 64,
+  "prompt_len": 1024,
+  "realized_prompt_tokens": 1024,
+  "output_len": 256,
+  "sweep_point": 64.0,
+  "window_dur_s": 10.409123439000723,
+  "t_start_mono_ns": 7524757425284,
+  "t_stop_mono_ns": 7539337048152,
+  "n_records": 60
+}
