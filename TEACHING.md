@@ -47,14 +47,13 @@ Use this for the whole explanation. Every term maps to one thing in the kitchen.
    each bite. Sets **TPOT / ITL** (time per output token / inter-token latency).
 
 In real terms:
-- **Prefill is compute-bound** — big dense matrix multiplies over all prompt
-  tokens, so the GPU's math units (tensor cores) are the bottleneck; power sits
-  near the chip's max (TDP).
-- **Decode is memory-bandwidth-bound** — it generates one token per forward pass,
-  which means streaming the *entire* model's weights out of GPU memory for just a
-  couple of FLOPs per byte. The math units sit idle waiting on memory, so power
-  stays *below* max. (This is the "roofline": you need ~200+ FLOPs per byte to
-  keep tensor cores fed; decode delivers ~1.)
+- **Prefill tends to be compute-bound** — big dense matrix multiplies over all
+  prompt tokens, so the GPU's math units (tensor cores) are the bottleneck.
+- **Decode at low batch is memory-bandwidth-bound** — it generates one token per
+  forward pass, which means streaming the *entire* model's weights out of GPU
+  memory for just a couple of FLOPs per byte. The math units sit idle waiting on
+  memory. (This is the "roofline": an A100 needs ~200 FLOPs per byte to keep its
+  tensor cores fed; decode at batch 1 delivers ~1.)
 
 > If you can say *"a long prompt hurts TTFT, a long answer hurts total time via
 > TPOT, and they're bottlenecked by completely different parts of the GPU"* — you
@@ -62,6 +61,23 @@ In real terms:
 
 And the kicker: **batching helps decode** because many requests reuse the same
 weights loaded once, raising FLOPs-per-byte back toward the compute regime.
+
+> ### ⚠️ Two traps hiding in the paragraph you just read
+>
+> **1. "Decode is memory-bound" is a statement about the IDLE GPU.** Batching raises
+> decode's arithmetic intensity, so the sentence stops being the whole story exactly
+> when the machine gets busy — which is when you care. (It still doesn't reach the
+> ridge on an A100; see Part II for why, and why that turns out to matter.)
+>
+> **2. "Compute-bound ⇒ power near TDP, memory-bound ⇒ power below TDP" is a real
+> physical tendency, and I still managed to reason backwards from it.** I read a
+> whole-window mean power of ~350 W (diluted by idle ramp and drain), called it
+> "below the 400 W cap", and concluded memory-bound. Over the samples where the GPU
+> was actually *busy*, the card was at ~385 W. Always ask what window your average
+> is over — and remember that power tells you the GPU is working hard, not *which
+> unit* is the limit.
+>
+> Part II is the story of walking into both.
 
 ---
 
@@ -178,7 +194,7 @@ Sibling concept — **open vs closed loop:**
 
 ---
 
-## 8. The journey: laptop → Colab → AWS (and why)
+## 8. The journey: laptop → Colab → cloud GPU (and why)
 
 > "I can't run this on my Mac — no NVIDIA GPU. So I built it in three hops, same
 > code the whole way; only the kitchen gets more real."
@@ -187,7 +203,7 @@ Sibling concept — **open vs closed loop:**
 |---|---|---|---|
 | **Mac** | no NVIDIA GPU | n/a | Write everything; test against a *mock* GPU server so the timing/metrics/plot code is proven before spending a cent. |
 | **Colab Pro** | real GPU (T4/L4/A100) | ❌ (already a container) | First *true* numbers cheaply; run vLLM natively (pip, not Docker). |
-| **AWS** | single cloud GPU | ✅ | The full **Dockerized**, reproducible benchmark for the polished results. |
+| **Cloud GPU** (the published run used **NVIDIA Brev**) | single A100 40GB SXM4 | ✅ | The full **Dockerized**, reproducible benchmark for the polished results. |
 
 All three speak the *identical* OpenAI API + expose the *same* `/metrics` names,
 so the benchmarking code is written once and never knows which platform it's on.
@@ -242,19 +258,107 @@ so the benchmarking code is written once and never knows which platform it's on.
 Everything above is the theory. Here's what a real A100 run taught me — and the most
 valuable lesson is one I didn't expect.
 
-## The result (single A100, Llama-3.1-8B, 512-token in / 128-token out)
+## The result (single A100 40 GB, Llama-3.1-8B, 512-token in / 128-token out)
 
-- **Throughput ceiling ≈ 16 req/s (~2,000 output tok/s).** Below ~8 req/s the server
-  keeps up (achieved ≈ offered). Push harder and **achieved throughput plateaus** — you
-  offer 16/24/32 req/s but only ~16 come out. That plateau is the GPU's max useful rate
-  for this model/config.
-- **The bottleneck was decode, not the queue.** Time-to-first-token stayed low (~160 ms);
-  it was **TPOT** (time per output token, ~48 ms) that crept past the 50 ms SLO. The GPU
-  telemetry agreed: utilization ~90% but **power sat below peak** and **KV-cache topped out
-  ~76% (never full)** — the classic fingerprint of a **memory-bandwidth-bound decode**, not a compute
-  or memory-capacity wall.
-- **Goodput ≠ throughput.** Raw throughput kept inching up while *useful* throughput
-  (requests meeting the SLO) fell off — the gap is work nobody can use.
+- **Highest observed throughput ≈ 16.6 req/s (~2,125 output tok/s).** Below ~8 req/s the
+  server keeps up (achieved ≈ offered). Push harder and the gain collapses: from 24 to 32
+  req/s offered, achieved throughput rises only 5.6% while latency degrades badly.
+- **Goodput ≠ throughput.** Under an SLO of TTFT ≤ 1s and TPOT ≤ 50ms, useful capacity
+  peaks around **7.2 req/s** — less than half the raw number — and falls to 0.5% SLO
+  attainment by 32 req/s. Raw throughput keeps inching up while *useful* throughput
+  collapses. The gap is work nobody can use.
+- **TPOT is what breaks the SLO.** At 16 and 24 req/s, *every single* SLO failure is a TPOT
+  failure; TTFT is still fine. But see below — TPOT is the victim, not the culprit.
+
+## ⚠️ A correction: the bottleneck is prefill compute, not decode bandwidth
+
+**This guide used to say the ceiling was memory-bandwidth-bound decode, citing "GPU util
+~90%, power below peak, KV never full." That was wrong, and the published data refutes
+it.** Keeping the mistake here on purpose, because how it happened is the lesson.
+
+Run `scripts/analyze_bottleneck.py` against either published open-loop run:
+
+- **Decode *cannot* be the compute wall — and VRAM is what proves it.** This is the cleanest
+  argument in the project, and it reuses the 128 KiB/token number from §4.
+
+  Decode's arithmetic intensity is *not* just the batch size; that only holds while weight
+  traffic dominates. Weights are read once per step and amortized across the batch, but
+  **every sequence's KV must be read separately**, so KV traffic grows with the batch and
+  refuses to be amortized — intensity stops climbing.
+
+  Now the part that binds: **KV has to fit in VRAM.** A 40 GB A100 stores ~16 GB of weights.
+  Even handing *every* remaining byte (~24 GB) to KV allows at most **~317 sequences** at a
+  576-token context, since one sequence's KV costs 75 MB. Feed that ceiling back into the
+  formula and decode's intensity tops out at **~125 FLOP/byte** — against an A100 ridge of
+  **~201**. At the batch actually observed (~145) it sits at **85**.
+
+  So decode cannot reach the compute roof at any batch this card can physically hold.
+  **Whatever pins the tensor cores, it isn't decode.**
+
+  *(Careful: the batch→∞ asymptote is ~203, which is marginally* above *the ridge. So the
+  asymptote alone proves nothing — an earlier version of this doc claimed it did and was
+  wrong. It is the VRAM cap, not the asymptote, that settles it.)*
+
+- **The power argument was backwards.** The "below peak" figure averaged in the idle ramp
+  and drain — it is what `summary.csv` reports, and it is what fooled me. Over rows with GPU
+  util ≥90%, rate 32 averages **384.6 W** of the 400 W cap. Memory-bound kernels draw *less*
+  power — it is dense GEMM that pins a power cap. (High power alone does not identify the
+  limiting unit, but it is not what a GPU idling on memory looks like.)
+- **The workload is 512-in / 128-out: four prompt tokens for every generated token.** At
+  saturation, forward passes carrying a prompt are ~30% of passes but occupy **~65% of the
+  GPU's clock**, at ~62% of the card's bf16 peak. Prompt-bearing intervals average **4.3×**
+  the duration of pure-decode intervals *and carry fewer decode emissions*, so a bigger
+  decode batch does not explain the gap.
+
+So TPOT degrades not because HBM saturates, but because decode steps are sharing forward
+passes with other people's prompts. **Decode is the casualty, not the cause.**
+
+What survives: **decode really is memory-bandwidth-bound in isolation.** At rate 2 the
+batch is ~3 and TPOT is 15 ms, implying ~1.07 TB/s of weight streaming — squarely
+memory-bound. The error was **scope**: that describes the *idle* GPU. Under load, batching
+amortizes the weight read across the batch, and prefill compute takes over.
+
+The general lesson, which is the whole point of §6 below: *the plausible story that
+matches what everyone already says is the dangerous one.* "Decode is memory-bound" is true
+and famous, and I reached for it instead of doing the arithmetic on my own workload.
+
+**The obvious objection, which you should raise yourself:** prefill passes only hit ~62% of
+compute peak and decode passes ~57% of bandwidth peak, so *neither roof is actually hit* —
+isn't the real limiter just kernel/scheduler overhead? Partly, yes: there is real headroom
+in both. But the claim isn't that prefill *saturates* the tensor cores; it's that prefill
+**owns the clock**. 30% of passes consume two-thirds of the wall time, and a pass takes 4×
+longer precisely when a prompt is in it. Scheduler overhead doesn't care whether a prompt is
+in the batch. Compute does.
+
+(Honest limits: those FLOP/s and GB/s are **modeled** from token counts, not measured —
+`nvidia-smi` gives no DRAM-active counter. And the sweep is a fill-and-drain transient, not
+a steady overload: at rate 32 all 200 requests are sent by t≈6.2s of a ~12s window. The
+directions are solid; the exact numbers are soft. Cleanly separating a compute *roof* from a
+mixed scheduler/kernel ceiling needs DCGM counters or a prefill-only/decode-only ablation.)
+
+## The third problem: knowing where the evidence stops
+
+TTFT p99 at rate 8 reads 1,529 ms — seven consecutive requests taking ~2 s to first token.
+
+My first explanation: they were *sent* on schedule, so it must be a **server** stall. My
+second: it must be a **client** event-loop stall. **Both were overconfident**, and that is
+the lesson worth more than either answer.
+
+What the data does say: the 21 requests *already streaming* at that moment all show their 128
+tokens arriving in fewer and fewer SSE chunks (122, 121, 76 … 10, 4), in a staircase ordered
+by start time. The harness flagged every one with `tokens_chunks_mismatch`. Something
+disrupted the streaming path for everything in flight at once.
+
+What the data does **not** say is which side caused it. `schedule_delay` proves the request
+coroutines fired on time — but it is stamped *before* the HTTP client acquires a connection,
+so it does not prove the bytes left on time. And chunk coalescing is something the *server*
+does when its output queue backs up, which a slow reader, transport backpressure, or a
+stalled server output loop all produce identically.
+
+The general point, and it is the same one as §6: **`schedule_delay` rules out late SENDS. It
+says nothing about the READ path.** Coordinated omission, a client send stall, and a client
+*read* stall look identical on a latency chart, and only the first two are what that metric
+tests. Naming the boundary of what you can conclude is part of the job.
 
 ## The lesson that matters most: cross-checking caught MY OWN bug
 
