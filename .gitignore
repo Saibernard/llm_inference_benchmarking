@@ -42,4 +42,12 @@ results/
 # --- OS ---
 .DS_Store
 Thumbs.db
+
+# --- Personal interview prep (not part of the project) ---
+INTERVIEW.md
+INTERVIEW.pdf
 INTERVIEW.html
+
+# --- Writeups / promo drafts (not part of the project) ---
+docs/linkedin-*.md
+scripts/make_pdf.sh
