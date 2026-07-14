@@ -179,6 +179,13 @@ def analyze_cell(cell: str) -> dict:
     pure_bytes = WEIGHT_BYTES + pure_batch * ctx * KV_PER_TOKEN
     pure_gbs = pure_bytes / (dur[pure].mean()) / 1e9 if pure.any() else np.nan
 
+    # whole-run aggregate DRAM traffic: every step reads the weights once, plus a KV read
+    # for each sequence active that step (~= decode emissions in the step). Averaged over
+    # the reconstructed wall clock. This is the "25-28% of peak" figure, distinct from the
+    # pure-decode-step figure above -- prefill-carrying steps move little data per unit time.
+    agg_bytes = (len(dur) * WEIGHT_BYTES + (dec * ctx * KV_PER_TOKEN).sum())
+    agg_gbs = agg_bytes / clock / 1e9 if clock > 0 else np.nan
+
     achieved = len(reqs) / (t1 - t0)
     decode_tps = achieved * output_len
 
@@ -201,7 +208,8 @@ def analyze_cell(cell: str) -> dict:
         mixed_pct_clock=round(100 * dur[mixed].sum() / clock, 1),
         mixed_tflops=round(mixed_tflops / 1e12, 1),
         mixed_mfu_pct=round(100 * mixed_tflops / A100_PEAK_TFLOPS, 1),
-        # --- pure-decode steps: where they actually sit on the roofline
+        # --- bandwidth: whole-run aggregate vs pure-decode-step (different quantities)
+        agg_pct_bw=round(100 * agg_gbs * 1e9 / A100_PEAK_BW, 1),
         decode_gbs=round(pure_gbs),
         decode_pct_bw=round(100 * pure_gbs * 1e9 / A100_PEAK_BW, 1),
         decode_AI=round(decode_intensity(pure_batch, ctx), 1),
