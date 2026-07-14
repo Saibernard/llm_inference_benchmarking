@@ -62,21 +62,30 @@ def kv_cache_bytes_per_token(
 def kv_capacity_estimate(
     gpu_mem_gb: float,
     weights_gb: float = LLAMA31_8B["weights_gb"],
-    overhead_gb: float = 3.0,
+    overhead_gb: float = 2.0,
+    gpu_memory_utilization: float = 0.90,
     ctx_len: int = 4096,
 ) -> dict[str, float]:
     """Map a GPU memory size + context length to a feasible concurrency grid.
 
-    Approximate (vLLM PagedAttention block sizing + chunked prefill change the
-    exact fit). Use for INSTANCE SELECTION, not exact provisioning — let vLLM
-    auto-size KV blocks via --gpu-memory-utilization and read the real count
-    from startup logs.
+    The budget vLLM actually works inside is `gpu_mem_gb * gpu_memory_utilization`
+    (the rest is a safety margin it will not touch). Weights and a fixed runtime
+    overhead (CUDA context, activations, CUDA graphs) come out of that; whatever is
+    left is the KV-cache budget, and dividing by the per-token KV size gives the
+    total token-slots. Concurrency = token-slots / context length.
+
+    Approximate (PagedAttention block sizing + chunked prefill shift the exact fit).
+    Use for INSTANCE SELECTION, not exact provisioning — vLLM logs the real KV block
+    count at startup.
     """
-    kv_budget_gb = max(0.0, gpu_mem_gb - weights_gb - overhead_gb)
+    usable_gb = gpu_mem_gb * gpu_memory_utilization
+    kv_budget_gb = max(0.0, usable_gb - weights_gb - overhead_gb)
     bytes_per_tok = kv_cache_bytes_per_token()
     total_token_slots = kv_budget_gb * (1024 ** 3) / bytes_per_tok
     return {
         "gpu_mem_gb": gpu_mem_gb,
+        "gpu_memory_utilization": gpu_memory_utilization,
+        "usable_gb": round(usable_gb, 2),
         "weights_gb": weights_gb,
         "overhead_gb": overhead_gb,
         "kv_budget_gb": round(kv_budget_gb, 2),

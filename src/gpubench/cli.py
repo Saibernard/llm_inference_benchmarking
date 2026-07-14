@@ -62,10 +62,12 @@ def _cmd_plan(args) -> int:
     print(f"Llama-3.1-8B KV cache: {kv_cache_bytes_per_token()} bytes/token "
           f"({kv_cache_bytes_per_token()/1024:.0f} KiB) — uses 8 KV heads (GQA), not 32.\n")
     mems = [args.gpu_mem] if args.gpu_mem else [16, 24, 40, 48, 80]
-    print(f"{'GPU(GB)':>8} {'KVbudget(GB)':>13} {'token-slots':>12} {f'conc@{args.ctx}ctx':>14}")
+    print("Budget = GPU x 0.9 (gpu-memory-utilization) - 16.1 GB weights - ~2 GB overhead.\n")
+    print(f"{'GPU(GB)':>8} {'usable(GB)':>11} {'KVbudget(GB)':>13} {'token-slots':>12} {f'conc@{args.ctx}ctx':>14}")
     for m in mems:
         e = kv_capacity_estimate(m, ctx_len=args.ctx)
-        print(f"{m:>8} {e['kv_budget_gb']:>13} {e['total_token_slots']:>12} {e['example_concurrency_at_ctx']:>14}")
+        print(f"{m:>8} {e['usable_gb']:>11} {e['kv_budget_gb']:>13} "
+              f"{e['total_token_slots']:>12} {e['example_concurrency_at_ctx']:>14}")
     return 0
 
 
